@@ -1,0 +1,128 @@
+# Turbohaul-Manager v0.3.0-southpaw — Southpaw's curated model server
+# Uses AtomicBot's atomic-llama-cpp-turboquant fork for full TQ3/TQ4 + MTP support.
+#
+# Build:
+#   docker build -f Dockerfile.atomic -t turbohaul-southpaw:v0.3.0 .
+#
+# Run (single GPU):
+#   docker run --gpus all -p 127.0.0.1:11401:11401 \
+#     -v ${PWD}/state:/var/lib/turbohaul \
+#     -v ${HOME}/Models/storage/gguf:/models \
+#     turbohaul-southpaw:v0.3.0
+#
+# Run (dual GPU, curated model auto-setup):
+#   docker run --gpus all -p 127.0.0.1:11401:11401 \
+#     -v ${PWD}/state:/var/lib/turbohaul \
+#     -v ${HOME}/Models/storage/gguf:/models \
+#     -e SOUTHPAW_PRESET=dual-3090 \
+#     turbohaul-southpaw:v0.3.0
+
+# ------------------------------------------------------------------------------
+# Stage 1: Frontend (same as upstream)
+# ------------------------------------------------------------------------------
+FROM node:20-alpine AS frontend-build
+WORKDIR /work
+COPY src/frontend/package.json src/frontend/package-lock.json ./
+RUN npm ci --no-audit --no-fund
+COPY src/frontend/. ./
+RUN npm run typecheck && npm run build
+
+# ------------------------------------------------------------------------------
+# Stage 2: Build AtomicBot's atomic-llama-cpp-turboquant from source
+#
+# This fork has:
+#   - TQ1_0, TQ2_0, TQ3_1S, TQ4_1S weight quantization
+#   - turbo2/3/4 KV cache quantization
+#   - MTP speculative decoding (--spec-type mtp, --spec-type nextn)
+#   - Qwen3.5/3.6 NextN + Gemma 4 MTP support
+#   - CPU MoE offloading (--cpu-moe, --n-cpu-moe)
+#   - Standard upstream features (flash attn, YaRN, jinja, etc.)
+#
+# CUDA arch targets: 8.6 (RTX 3090/4090), 8.9 (RTX 4060/4070), 12.0 (Blackwell)
+# Adjust CMAKE_CUDA_ARCHITECTURES for your hardware.
+# ------------------------------------------------------------------------------
+FROM nvidia/cuda:12.9.0-devel-ubuntu22.04 AS llama-build
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      git cmake build-essential curl ca-certificates \
+      libcurl4-openssl-dev libssl-dev \
+ && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /build
+RUN git clone --depth 1 \
+      https://github.com/AtomicBot-ai/atomic-llama-cpp-turboquant.git \
+      /build/llama.cpp
+
+WORKDIR /build/llama.cpp
+RUN cmake -B build \
+      -DGGML_CUDA=ON \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_CUDA_ARCHITECTURES="86;89;120" \
+ && cmake --build build --config Release -j$(nproc)
+
+# Verify the binary works
+RUN build/bin/llama-server --version
+
+# ------------------------------------------------------------------------------
+# Stage 3: Runtime (CUDA 12.9 + Python 3.11 + turbohaul + atomic fork binary)
+# ------------------------------------------------------------------------------
+FROM nvidia/cuda:12.9.0-runtime-ubuntu22.04 AS runtime
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      python3.11 python3.11-venv python3.11-dev \
+      ca-certificates curl procps libgomp1 \
+      git wget \
+ && rm -rf /var/lib/apt/lists/* \
+ && ln -sf /usr/bin/python3.11 /usr/local/bin/python3 \
+ && ln -sf /usr/bin/python3.11 /usr/local/bin/python
+
+# Virtualenv for turbohaul
+RUN python3.11 -m venv /opt/venv \
+ && /opt/venv/bin/pip install --no-cache-dir --upgrade pip
+ENV PATH=/opt/venv/bin:${PATH}
+
+WORKDIR /app
+COPY pyproject.toml README.md ./
+COPY src/turbohaul/ ./src/turbohaul/
+COPY presets/ ./presets/
+RUN /opt/venv/bin/pip install --no-cache-dir .
+RUN /opt/venv/bin/pip install --no-cache-dir jsonschema==4.21.1
+
+# Copy AtomicBot's compiled llama-server + shared libs
+COPY --from=llama-build /build/llama.cpp/build/bin /opt/atomic-llama/build/bin
+RUN mkdir -p /opt/turbohaul/bin \
+ && ln -sf /opt/atomic-llama/build/bin/llama-server /opt/turbohaul/bin/llama-server
+
+# Frontend bundle
+COPY --from=frontend-build /work/dist /opt/turbohaul/ui_dist
+
+# Southpaw curated preset scripts
+COPY presets/southpaw-setup.sh /opt/turbohaul/bin/southpaw-setup
+RUN chmod +x /opt/turbohaul/bin/southpaw-setup
+
+# Runtime dirs
+RUN mkdir -p /var/lib/turbohaul /etc/turbohaul /models \
+ && chmod 700 /var/lib/turbohaul
+
+# Default config (overridable via bind-mount)
+COPY docker/turbohaul.default.yaml /etc/turbohaul/turbohaul.yaml
+COPY presets/southpaw-presets.yaml /etc/turbohaul/southpaw-presets.yaml
+
+# Attribution + license
+COPY THIRD_PARTY_LICENSES.md /usr/share/doc/turbohaul/THIRD_PARTY_LICENSES.md
+
+EXPOSE 11401
+
+ENV TURBOHAUL_CONFIG_PATH=/etc/turbohaul/turbohaul.yaml \
+    TURBOHAUL_ALLOW_PUBLIC_BIND=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    LD_LIBRARY_PATH=/opt/atomic-llama/build/bin:/usr/local/cuda/lib64:/usr/local/cuda/lib64/stubs \
+    SOUTHPAW_MODEL_DIR=/models
+
+HEALTHCHECK --interval=15s --timeout=3s --retries=5 \
+  CMD curl -fsS http://127.0.0.1:11401/health || exit 1
+
+ENTRYPOINT ["turbohaul-manager"]

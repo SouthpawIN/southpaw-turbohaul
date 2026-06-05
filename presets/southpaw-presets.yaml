@@ -1,0 +1,229 @@
+# Southpaw's Curated Model Presets
+# Hand-picked models for the Nous Research community
+# Auto-selects optimal quant based on detected VRAM
+
+presets:
+
+  # ===== REASONING / MAIN MODEL =====
+  darwin-28b-reason:
+    name: "Darwin-28B-REASON"
+    description: "Graduate-level STEM reasoning, GPQA 89.39%"
+    repo: "mradermacher/Darwin-28B-REASON-GGUF"
+    architecture: "qwen35-dense"
+    params: "27.6B"
+    role: main
+    strengths: ["reasoning", "math", "science", "chain-of-thought"]
+    hardware_tiers:
+      8gb:
+        quant: "Q2_K"
+        filename: "Darwin-28B-REASON.Q2_K.gguf"
+        size_bytes: 10800000000
+        flags:
+          n_gpu_layers: 20
+          ctx_size: 8192
+          flash_attn: "auto"
+      16gb:
+        quant: "Q3_K_M"
+        filename: "Darwin-28B-REASON.Q3_K_M.gguf"
+        size_bytes: 13400000000
+        flags:
+          n_gpu_layers: 40
+          ctx_size: 32768
+          flash_attn: "on"
+          cache_type_k: "q4_0"
+          cache_type_v: "q4_0"
+      24gb:
+        quant: "Q4_K_M"
+        filename: "Darwin-28B-REASON.Q4_K_M.gguf"
+        size_bytes: 16547396352
+        flags:
+          n_gpu_layers: 99
+          ctx_size: 262144
+          flash_attn: "on"
+          cache_type_k: "q4_0"
+          cache_type_v: "q4_0"
+      32gb:
+        quant: "Q5_K_M"
+        filename: "Darwin-28B-REASON.Q5_K_M.gguf"
+        size_bytes: 19300000000
+        flags:
+          n_gpu_layers: 99
+          ctx_size: 262144
+          flash_attn: "on"
+          cache_type_k: "q8_0"
+          cache_type_v: "q8_0"
+      48gb:
+        quant: "Q6_K"
+        filename: "Darwin-28B-REASON.Q6_K.gguf"
+        size_bytes: 22200000000
+        flags:
+          n_gpu_layers: 99
+          ctx_size: 262144
+          flash_attn: "on"
+          cache_type_k: "q8_0"
+          cache_type_v: "q8_0"
+    download_urls:
+      Q2_K: "https://huggingface.co/mradermacher/Darwin-28B-REASON-GGUF/resolve/main/Darwin-28B-REASON.Q2_K.gguf"
+      Q3_K_M: "https://huggingface.co/mradermacher/Darwin-28B-REASON-GGUF/resolve/main/Darwin-28B-REASON.Q3_K_M.gguf"
+      Q4_K_M: "https://huggingface.co/mradermacher/Darwin-28B-REASON-GGUF/resolve/main/Darwin-28B-REASON.Q4_K_M.gguf"
+      Q5_K_M: "https://huggingface.co/mradermacher/Darwin-28B-REASON-GGUF/resolve/main/Darwin-28B-REASON.Q5_K_M.gguf"
+      Q6_K: "https://huggingface.co/mradermacher/Darwin-28B-REASON-GGUF/resolve/main/Darwin-28B-REASON.Q6_K.gguf"
+
+  # ===== FAST MOE / AUXILIARY MODEL =====
+  apex-mtp-35b-a3b:
+    name: "APEX-MTP 35B-A3B"
+    description: "Fast MoE with self-speculative decoding, 1M context"
+    repo: "mudler/Qwen3.6-35B-A3B-APEX-MTP-GGUF"
+    architecture: "qwen36-moe"
+    params: "35B total / 3B active"
+    experts: "256 routed + 1 shared (8 active)"
+    role: auxiliary
+    strengths: ["speed", "tool-calling", "long-context", "mtp-speculative"]
+    hardware_tiers:
+      8gb:
+        quant: "I-Nano"
+        filename: "Qwen3.6-35B-A3B-APEX-MTP-I-Nano.gguf"
+        size_bytes: 11700000000
+        flags:
+          n_gpu_layers: 15
+          cpu_moe: true
+          ctx_size: 8192
+          flash_attn: "auto"
+      16gb:
+        quant: "I-Mini"
+        filename: "Qwen3.6-35B-A3B-APEX-MTP-I-Mini.gguf"
+        size_bytes: 14300000000
+        flags:
+          n_gpu_layers: 30
+          cpu_moe: true
+          ctx_size: 32768
+          flash_attn: "on"
+      24gb:
+        quant: "I-Compact"
+        filename: "Qwen3.6-35B-A3B-APEX-MTP-I-Compact.gguf"
+        size_bytes: 17329854048
+        flags:
+          n_gpu_layers: 99
+          cpu_moe: true
+          ctx_size: 1048576
+          flash_attn: "on"
+          cache_type_k: "q4_0"
+          cache_type_v: "q4_0"
+          spec_type: "nextn"
+          draft_block_size: 3
+      32gb:
+        quant: "I-Balanced"
+        filename: "Qwen3.6-35B-A3B-APEX-MTP-I-Balanced.gguf"
+        size_bytes: 26100000000
+        flags:
+          n_gpu_layers: 99
+          ctx_size: 1048576
+          flash_attn: "on"
+          cache_type_k: "q8_0"
+          cache_type_v: "q8_0"
+          spec_type: "nextn"
+          draft_block_size: 3
+      48gb:
+        quant: "I-Quality"
+        filename: "Qwen3.6-35B-A3B-APEX-MTP-I-Quality.gguf"
+        size_bytes: 23500000000
+        flags:
+          n_gpu_layers: 99
+          ctx_size: 1048576
+          flash_attn: "on"
+          cache_type_k: "q8_0"
+          cache_type_v: "q8_0"
+          spec_type: "nextn"
+          draft_block_size: 3
+    download_urls:
+      I-Nano: "https://huggingface.co/mudler/Qwen3.6-35B-A3B-APEX-MTP-GGUF/resolve/main/Qwen3.6-35B-A3B-APEX-MTP-I-Nano.gguf"
+      I-Mini: "https://huggingface.co/mudler/Qwen3.6-35B-A3B-APEX-MTP-GGUF/resolve/main/Qwen3.6-35B-A3B-APEX-MTP-I-Mini.gguf"
+      I-Compact: "https://huggingface.co/mudler/Qwen3.6-35B-A3B-APEX-MTP-GGUF/resolve/main/Qwen3.6-35B-A3B-APEX-MTP-I-Compact.gguf"
+      I-Balanced: "https://huggingface.co/mudler/Qwen3.6-35B-A3B-APEX-MTP-GGUF/resolve/main/Qwen3.6-35B-A3B-APEX-MTP-I-Balanced.gguf"
+      I-Quality: "https://huggingface.co/mudler/Qwen3.6-35B-A3B-APEX-MTP-GGUF/resolve/main/Qwen3.6-35B-A3B-APEX-MTP-I-Quality.gguf"
+
+  # ===== DENSE 27B (general purpose) =====
+  qwen36-27b:
+    name: "Qwen 3.6 27B"
+    description: "Best all-around 27B dense model, tool calling, 256K context"
+    repo: "unsloth/Qwen3.6-27B-GGUF"
+    architecture: "qwen36-dense"
+    params: "27B"
+    role: main
+    strengths: ["general", "tool-calling", "coding", "conversation"]
+    hardware_tiers:
+      16gb:
+        quant: "UD-Q3_K_XL"
+        filename: "Qwen3.6-27B-UD-Q3_K_XL.gguf"
+        flags:
+          n_gpu_layers: 40
+          ctx_size: 32768
+          flash_attn: "on"
+      24gb:
+        quant: "UD-Q4_K_M"
+        filename: "Qwen3.6-27B-UD-Q4_K_M.gguf"
+        flags:
+          n_gpu_layers: 99
+          ctx_size: 131072
+          flash_attn: "on"
+          cache_type_k: "q4_0"
+          cache_type_v: "q4_0"
+
+  # ===== FAST MOE 27B-A3B (lightweight aux) =====
+  qwen36-35b-a3b:
+    name: "Qwen 3.6 35B-A3B"
+    description: "Lightweight MoE, 3B active, great for aux tasks"
+    repo: "unsloth/Qwen3.6-35B-A3B-GGUF"
+    architecture: "qwen36-moe"
+    params: "35B total / 3B active"
+    role: auxiliary
+    strengths: ["speed", "efficiency", "tool-calling"]
+    hardware_tiers:
+      8gb:
+        quant: "Q3_K_M"
+        filename: "Qwen3.6-35B-A3B-Q3_K_M.gguf"
+        flags:
+          n_gpu_layers: 15
+          cpu_moe: true
+          ctx_size: 8192
+      24gb:
+        quant: "UD-Q4_K_M"
+        filename: "Qwen3.6-35B-A3B-UD-Q4_K_M.gguf"
+        flags:
+          n_gpu_layers: 99
+          cpu_moe: true
+          ctx_size: 65536
+          flash_attn: "on"
+
+# ===== HARDWARE PRESETS =====
+# These map detected GPU configs to model+flag combos
+
+hardware_presets:
+  single-8gb:
+    main: { preset: "qwen36-27b", tier: "16gb" }
+    aux: { preset: "qwen36-35b-a3b", tier: "8gb" }
+
+  single-16gb:
+    main: { preset: "darwin-28b-reason", tier: "16gb" }
+    aux: { preset: "qwen36-35b-a3b", tier: "8gb" }
+
+  single-24gb:
+    main: { preset: "darwin-28b-reason", tier: "24gb" }
+    aux: { preset: "apex-mtp-35b-a3b", tier: "24gb" }
+
+  dual-24gb:
+    main: { preset: "darwin-28b-reason", tier: "24gb", gpu: 0 }
+    aux: { preset: "apex-mtp-35b-a3b", tier: "24gb", gpu: 1 }
+
+  single-48gb:
+    main: { preset: "darwin-28b-reason", tier: "48gb" }
+    aux: { preset: "apex-mtp-35b-a3b", tier: "48gb" }
+
+  dual-48gb:
+    main: { preset: "darwin-28b-reason", tier: "48gb", gpu: 0 }
+    aux: { preset: "apex-mtp-35b-a3b", tier: "48gb", gpu: 1 }
+
+  # API-only (no local models)
+  api-only:
+    main: null
+    aux: null

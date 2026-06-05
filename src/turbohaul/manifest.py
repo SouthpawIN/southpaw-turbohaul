@@ -135,6 +135,8 @@ SAFE_LLAMA_FLAGS: dict[str, Any] = {
     "spec_draft_p_split": float,         # draft split probability threshold
     "spec_draft_ngl": int,               # draft GPU layers (bundled MTP head; usually same device)
     "spec_draft_backend_sampling": bool, # backend-side sampling for the draft path
+    "draft_block_size": int,             # AtomicBot fork: MTP draft block size B (drafts B-1 tokens; default 3)
+    "mtp_head": str,                     # AtomicBot fork: path to MTP head GGUF (e.g. gemma4_assistant)
     # === Server toggles ===
     "metrics": bool,
     "slots": bool,
@@ -215,6 +217,8 @@ SAFE_LLAMA_FLAG_BOUNDS: dict[str, tuple[Any, Any]] = {
     "spec_draft_p_min": (0.0, 1.0),
     "spec_draft_p_split": (0.0, 1.0),
     "spec_draft_ngl": (-1, 999),
+    # AtomicBot fork additions
+    "draft_block_size": (1, 64),   # draft B-1 tokens per round
 }
 
 
@@ -232,9 +236,9 @@ SAFE_LLAMA_FLAG_STRING_ENUMS: dict[str, set[str]] = {
     "reasoning": {"on", "off", "auto"},
     "pooling": {"none", "mean", "cls", "last", "rank"},
     "log_colors": {"on", "off", "auto"},
-    # spec_type: confirm full accepted token set from `llama-server --help` (PR#22673 enum:
-    # draft / draft-eagle3 / draft-mtp). We only enable draft-mtp.
-    "spec_type": {"draft-mtp"},
+    # spec_type: AtomicBot fork uses "mtp" (Gemma 4) and "nextn" (Qwen3 NextN).
+    # Upstream uses "draft-mtp". Allow all three for compatibility.
+    "spec_type": {"draft-mtp", "mtp", "nextn"},
 }
 
 # flash_attn — special-case tri-state. Accepts bool (legacy) OR str enum.
