@@ -1,0 +1,20 @@
+model_tag: apex-mtp
+display_name: APEX-MTP 35B-A3B
+description: ''
+gguf_blob_sha256: 7758ab03a600f486e8b50b2a454874a03b52c11a6f813db561749e9beb3ab06e
+gguf_size_bytes: 17329854048
+context_size: 1048576
+expected_vram_bytes: 20000000000
+revision: 1
+llama_server_flags:
+  n_gpu_layers: 99
+  cpu_moe: true
+  ctx_size: 1048576
+  flash_attn: 'on'
+  cache_type_k: q4_0
+  cache_type_v: q4_0
+  spec_type: nextn
+  draft_block_size: 3
+prompt_template:
+  system_default: ''
+  stop_tokens: []

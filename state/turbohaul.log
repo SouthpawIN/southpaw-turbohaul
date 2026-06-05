@@ -1,0 +1,15 @@
+2026-06-05 13:39:48,000 INFO turbohaul.main | loading config: /home/sovthpaw/projects/LLM-Infra/southpaw-turbohaul/state/turbohaul-runtime.yaml
+2026-06-05 13:39:48,003 WARNING turbohaul.main | --allow-public-bind in effect: uvicorn binding 0.0.0.0 (BootConfig.server.host=127.0.0.1 preserved)
+2026-06-05 13:39:48,003 INFO turbohaul.main | ready: 0.0.0.0:11401 (ui.enabled=True ui.static_path=/home/sovthpaw/projects/LLM-Infra/southpaw-turbohaul/src/frontend/dist)
+INFO:     Started server process [3283919]
+INFO:     Waiting for application startup.
+2026-06-05 13:39:48,429 INFO turbohaul.api.main | boot_reconcile: {'orphans_reaped': 0, 'orphans_failed': 0, 'foreign_gpu_apps': [{'pid': 4184, 'used_memory_mib': 260, 'cmdline': '/usr/libexec/gnome-remote-desktop-daemon'}, {'pid': 411553, 'used_memory_mib': 2594, 'cmdline': '/home/sovthpaw/projects/LLM-Infra/llama.cpp/build/bin/llama-server -m /home/sovthpaw/Models/storage/gguf/Qwen3.6-35B-A3B-APEX-MTP-I-Compact.gguf --host 127.0.0.1 --port 19081 -ngl 99 --cpu-moe -ctk q4_0 -ctv q4_0 -c 65536 -fa on'}], 'slots_reconciled_to_cold': 0}
+2026-06-05 13:39:48,429 INFO turbohaul.manager | worker_loop started
+2026-06-05 13:39:48,429 INFO turbohaul.manager | periodic_terminal_park_sweep started (interval=60s, min_age=86400s)
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:11401 (Press CTRL+C to quit)
+INFO:     127.0.0.1:33016 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58496 - "PUT /api/manifests/darwin-28b HTTP/1.1" 400 Bad Request
+INFO:     127.0.0.1:59352 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:36304 - "PUT /api/manifests/darwin-28b HTTP/1.1" 200 OK
+INFO:     127.0.0.1:37574 - "PUT /api/manifests/apex-mtp HTTP/1.1" 400 Bad Request

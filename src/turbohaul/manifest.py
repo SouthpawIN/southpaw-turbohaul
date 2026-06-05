@@ -539,6 +539,7 @@ class Manifest(BaseModel):
     gguf_size_bytes: int = Field(default=0, ge=0)
     context_size: int = Field(default=2048, ge=1)
     expected_vram_bytes: int = Field(default=0, ge=0)  # mandatory for VRAM-fit pre-check (v0.2 §10 + §15)
+    mmproj_blob_sha256: str = ""  # optional: mmproj projector for multimodal models
     revision: int = Field(default=1, ge=1)  # ETag value
     llama_server_flags: dict[str, Any] = Field(default_factory=dict)
     prompt_template: PromptTemplate = Field(default_factory=PromptTemplate)
