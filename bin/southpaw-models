@@ -1,0 +1,324 @@
+#!/usr/bin/env bash
+# ═══════════════════════════════════════════════════════
+#  SOUTHPAW'S MODEL SELECTOR
+#  Auto-detects, downloads, starts, and switches models
+# ═══════════════════════════════════════════════════════
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+CONFIG="${SOUTHPAW_MODELS_CONFIG:-$HOME/.hermes/skills/southpaw-models/models.yaml}"
+MODEL_DIR="${SOUTHPAW_MODEL_DIR:-$HOME/Models/storage/gguf}"
+LLAMA_BIN="${SOUTHPAW_LLAMA_BIN:-$HOME/projects/LLM-Infra/llama.cpp-atomic/build/bin/llama-server}"
+LLAMA_LIB="${SOUTHPAW_LLAMA_LIB:-$HOME/projects/LLM-Infra/llama.cpp-atomic/build/bin}"
+HEALTH_TIMEOUT=120
+
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; NC='\033[0m'
+log()  { echo -e "${GREEN}[southpaw]${NC} $*"; }
+warn() { echo -e "${YELLOW}[southpaw]${NC} $*"; }
+err()  { echo -e "${RED}[southpaw]${NC} $*" >&2; }
+
+# ---------- YAML Parser (no yq dependency) ----------
+
+yaml_get() {
+    python3 -c "
+import yaml, sys
+with open('${CONFIG}') as f:
+    cfg = yaml.safe_load(f)
+keys = '${1}'.split('.')
+val = cfg
+for k in keys:
+    if isinstance(val, dict):
+        val = val.get(k, {})
+    else:
+        val = {}
+        break
+if isinstance(val, (dict, list)):
+    import json; print(json.dumps(val))
+else:
+    print(val)
+" 2>/dev/null
+}
+
+# ---------- Hardware Detection ----------
+
+detect_vram() {
+    nvidia-smi --query-gpu=memory.total --format=csv,noheader -i 0 2>/dev/null | tr -d ' MiB'
+}
+
+detect_tier() {
+    local vram
+    vram=$(detect_vram)
+    if [[ -z "$vram" || "$vram" -lt 6000 ]]; then echo "8gb"
+    elif [[ "$vram" -lt 14000 ]]; then echo "16gb"
+    elif [[ "$vram" -lt 28000 ]]; then echo "24gb"
+    elif [[ "$vram" -lt 40000 ]]; then echo "32gb"
+    else echo "48gb"
+    fi
+}
+
+# ---------- Download ----------
+
+download_model() {
+    local url="$1" dest="$2" name="$3"
+    if [[ -f "$dest" ]]; then
+        log "${name} already downloaded"
+        return 0
+    fi
+    log "Downloading ${name}..."
+    mkdir -p "$(dirname "$dest")"
+    if command -v wget &>/dev/null; then
+        wget -q --show-progress -O "$dest" "$url"
+    else
+        curl -L --progress-bar -o "$dest" "$url"
+    fi
+    log "Downloaded: $(du -h "$dest" | cut -f1)"
+}
+
+# ---------- Service Management ----------
+
+ensure_model() {
+    local model_id="$1"
+    local tier
+    tier=$(detect_tier)
+
+    # Get model info from config
+    local name port systemd file url
+    name=$(yaml_get "models.${model_id}.name")
+    port=$(yaml_get "models.${model_id}.port")
+    systemd=$(yaml_get "models.${model_id}.systemd")
+    file=$(yaml_get "models.${model_id}.quants.${tier}.file")
+    url=$(yaml_get "models.${model_id}.quants.${tier}.url")
+    flags=$(yaml_get "models.${model_id}.quants.${tier}.flags")
+
+    if [[ -z "$file" || "$file" == "{}" ]]; then
+        err "No quant found for ${model_id} at ${tier} tier"
+        return 1
+    fi
+
+    # Download if missing
+    download_model "$url" "${MODEL_DIR}/${file}" "${name} (${tier})"
+
+    # Create systemd service if not exists
+    local service_file="$HOME/.config/systemd/user/${systemd}.service"
+    if [[ ! -f "$service_file" ]]; then
+        log "Creating systemd service: ${systemd}"
+        create_service "$service_file" "$systemd" "$model_id" "$port" "$file" "$flags"
+    fi
+
+    # Start if not running
+    if curl -sf --connect-timeout 2 "http://127.0.0.1:${port}/health" 2>/dev/null | grep -q '"ok"'; then
+        log "${name} already running on :${port}"
+        return 0
+    fi
+
+    log "Starting ${name}..."
+    systemctl --user start "${systemd}.service" 2>/dev/null || true
+
+    for i in $(seq 1 "$HEALTH_TIMEOUT"); do
+        if curl -sf --connect-timeout 2 "http://127.0.0.1:${port}/health" 2>/dev/null | grep -q '"ok"'; then
+            log "${name} ready on :${port} (${i}s)"
+            return 0
+        fi
+        sleep 1
+    done
+
+    err "${name} failed to start within ${HEALTH_TIMEOUT}s"
+    return 1
+}
+
+create_service() {
+    local path="$1" name="$2" model_id="$3" port="$4" file="$5" flags="$6"
+
+    # Build llama-server command from flags
+    local flag_str=""
+    flag_str=$(python3 -c "
+import yaml, json
+flags = json.loads('${flags}')
+parts = []
+for k, v in flags.items():
+    cli = '--' + k.replace('_', '-')
+    if isinstance(v, bool):
+        if v: parts.append(cli)
+    else:
+        parts.extend([cli, str(v)])
+print(' '.join(parts))
+" 2>/dev/null)
+
+    cat > "$path" <<EOF
+[Unit]
+Description=${name} — Southpaw's curated model
+After=network.target
+
+[Service]
+Type=simple
+Environment="CUDA_VISIBLE_DEVICES=0"
+Environment="LD_LIBRARY_PATH=${LLAMA_LIB}"
+ExecStart=${LLAMA_BIN} \\
+    -m ${MODEL_DIR}/${file} \\
+    --host 127.0.0.1 --port ${port} \\
+    --no-mmap \\
+    ${flag_str}
+Restart=always
+RestartSec=10
+StandardOutput=append:/tmp/${name}.log
+StandardError=append:/tmp/${name}.log
+
+[Install]
+WantedBy=default.target
+EOF
+
+    systemctl --user daemon-reload
+    systemctl --user enable "${name}.service"
+}
+
+# ---------- Hermes Config ----------
+
+set_hermes() {
+    local section="$1" provider="$2" base_url="$3" default="$4"
+    hermes config set "${section}.provider" "$provider" 2>&1 | grep -v "^$"
+    hermes config set "${section}.base_url" "$base_url" 2>&1 | grep -v "^$"
+    [[ -n "$default" ]] && hermes config set "${section}.default" "$default" 2>&1 | grep -v "^$"
+}
+
+# ---------- Presets ----------
+
+apply_preset() {
+    local preset="$1"
+    local main_id aux_id main_name aux_name
+
+    main_id=$(yaml_get "presets.${preset}.main")
+    aux_id=$(yaml_get "presets.${preset}.aux")
+    desc=$(yaml_get "presets.${preset}.description")
+
+    log "═══ ${desc} ═══"
+
+    # Ensure main model
+    if [[ -n "$main_id" && "$main_id" != "null" && "$main_id" != "None" && "$main_id" != "{}" ]]; then
+        ensure_model "$main_id" || exit 1
+        local main_port
+        main_port=$(yaml_get "models.${main_id}.port")
+        main_name=$(yaml_get "models.${main_id}.name")
+        set_hermes "model" "custom" "http://127.0.0.1:${main_port}/v1" "$main_id"
+    else
+        set_hermes "model" "nous" "https://inference-api.nousresearch.com/v1" ""
+        main_name="Nous API"
+    fi
+
+    # Ensure aux model
+    if [[ -n "$aux_id" && "$aux_id" != "null" && "$aux_id" != "None" && "$aux_id" != "{}" ]]; then
+        ensure_model "$aux_id" || exit 1
+        local aux_port
+        aux_port=$(yaml_get "models.${aux_id}.port")
+        aux_name=$(yaml_get "models.${aux_id}.name")
+        set_hermes "auxiliary" "custom" "http://127.0.0.1:${aux_port}/v1" "$aux_id"
+    else
+        set_hermes "auxiliary" "nous" "https://inference-api.nousresearch.com/v1" ""
+        aux_name="Nous API (auto)"
+    fi
+
+    echo ""
+    log "✅ Active:"
+    echo "   Main: ${main_name}"
+    echo "   Aux:  ${aux_name}"
+}
+
+# ---------- Status ----------
+
+show_status() {
+    echo -e "${CYAN}═══ Southpaw Model Server ═══${NC}"
+    echo ""
+
+    # Check each model in config
+    python3 -c "
+import yaml
+with open('${CONFIG}') as f:
+    cfg = yaml.safe_load(f)
+for mid, m in cfg.get('models', {}).items():
+    port = m.get('port', '?')
+    print(f'{mid}|{m[\"name\"]}|{port}')
+" 2>/dev/null | while IFS='|' read mid mname port; do
+        if curl -sf --connect-timeout 2 "http://127.0.0.1:${port}/health" 2>/dev/null | grep -q '"ok"'; then
+            echo -e "  ${mname}  :${port}  ${GREEN}● running${NC}"
+        else
+            echo -e "  ${mname}  :${port}  ${RED}● stopped${NC}"
+        fi
+    done
+
+    echo ""
+    echo -e "${CYAN}═══ Hardware ═══${NC}"
+    echo "  Tier: $(detect_tier) ($(detect_vram) MiB GPU)"
+    nvidia-smi --query-gpu=index,memory.used,memory.free --format=csv,noheader 2>/dev/null | while IFS=, read gpu used free; do
+        echo "  GPU ${gpu}: ${used} used / ${free} free"
+    done
+
+    echo ""
+    echo -e "${CYAN}═══ Hermes ═══${NC}"
+    python3 -c "
+import yaml
+with open('$HOME/.hermes/config.yaml') as f:
+    c = yaml.safe_load(f)
+m = c.get('model', {})
+a = c.get('auxiliary', {})
+print(f'  Main: {m.get(\"provider\",\"?\")} → {m.get(\"base_url\",\"?\")}')
+print(f'  Aux:  {a.get(\"provider\",\"?\")} → {a.get(\"base_url\",\"?\")}')
+" 2>/dev/null
+}
+
+# ---------- List Models ----------
+
+list_models() {
+    echo -e "${CYAN}═══ Southpaw's Curated Picks ═══${NC}"
+    echo ""
+    python3 -c "
+import yaml
+with open('${CONFIG}') as f:
+    cfg = yaml.safe_load(f)
+
+for mid, m in cfg.get('models', {}).items():
+    quants = m.get('quants', {})
+    tiers = ', '.join(quants.keys())
+    print(f'  {mid}')
+    print(f'    {m[\"description\"]}')
+    print(f'    {m[\"params\"]} | {m[\"role\"]} | tiers: {tiers}')
+    print()
+
+print('Presets:')
+for pid, p in cfg.get('presets', {}).items():
+    main = p.get('main') or 'API'
+    aux = p.get('aux') or 'API'
+    print(f'  {pid:15s}  main={main}  aux={aux}  — {p[\"description\"]}')
+"
+}
+
+# ---------- Add Model ----------
+
+add_model() {
+    local model_id="$1"
+    log "Adding model: ${model_id}"
+    log "Edit ${CONFIG} to configure quants and flags"
+    log "Then run: southpaw-models ${model_id}"
+}
+
+# ---------- Main ----------
+
+case "${1:-status}" in
+    darwin+apex|paired|local)  apply_preset "darwin+apex" ;;
+    darwin|darwin-solo)        apply_preset "darwin" ;;
+    apex|apex-solo)            apply_preset "apex" ;;
+    api|nous|cloud)            apply_preset "api" ;;
+    status|s)                  show_status ;;
+    list|ls|l)                 list_models ;;
+    add)                       add_model "${2:-}" ;;
+    *)
+        echo "Usage: southpaw-models <command>"
+        echo ""
+        echo "Commands:"
+        echo "  darwin+apex   Full local (Darwin main + APEX aux)"
+        echo "  darwin        Darwin main + API aux"
+        echo "  apex          APEX main + API aux"
+        echo "  api           Nous API (cloud)"
+        echo "  status        Show current state"
+        echo "  list          Show available models"
+        echo "  add <id>      Add a new model to config"
+        ;;
+esac

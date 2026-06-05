@@ -1,0 +1,113 @@
+# ═══════════════════════════════════════════════════════
+#  SOUTHPAW'S CURATED MODEL PICKS
+#  Edit this file to add/remove models. The system handles
+#  downloading, optimization, and server management.
+# ═══════════════════════════════════════════════════════
+
+models:
+
+  # ─── MAIN MODELS (reasoning, conversation, coding) ───
+
+  darwin-28b:
+    name: "Darwin-28B-REASON"
+    description: "Graduate-level STEM reasoning, GPQA 89.39%"
+    repo: "mradermacher/Darwin-28B-REASON-GGUF"
+    params: "27.6B dense"
+    role: main
+    strengths: [reasoning, math, science, chain-of-thought]
+    port: 11500
+    systemd: llama-darwin
+    quants:
+      8gb:
+        file: "Darwin-28B-REASON.Q2_K.gguf"
+        url: "https://huggingface.co/mradermacher/Darwin-28B-REASON-GGUF/resolve/main/Darwin-28B-REASON.Q2_K.gguf"
+        flags: { n_gpu_layers: 20, ctx_size: 8192, flash_attn: "auto" }
+      16gb:
+        file: "Darwin-28B-REASON.Q3_K_M.gguf"
+        url: "https://huggingface.co/mradermacher/Darwin-28B-REASON-GGUF/resolve/main/Darwin-28B-REASON.Q3_K_M.gguf"
+        flags: { n_gpu_layers: 40, ctx_size: 32768, flash_attn: "on", cache_type_k: "q4_0", cache_type_v: "q4_0" }
+      24gb:
+        file: "Darwin-28B-REASON.Q4_K_M.gguf"
+        url: "https://huggingface.co/mradermacher/Darwin-28B-REASON-GGUF/resolve/main/Darwin-28B-REASON.Q4_K_M.gguf"
+        flags: { n_gpu_layers: 99, ctx_size: 262144, flash_attn: "on", cache_type_k: "turbo3", cache_type_v: "turbo3" }
+      32gb:
+        file: "Darwin-28B-REASON.Q5_K_M.gguf"
+        url: "https://huggingface.co/mradermacher/Darwin-28B-REASON-GGUF/resolve/main/Darwin-28B-REASON.Q5_K_M.gguf"
+        flags: { n_gpu_layers: 99, ctx_size: 262144, flash_attn: "on", cache_type_k: "q8_0", cache_type_v: "q8_0" }
+
+  # ─── AUX MODELS (fast tasks, tool calling, long context) ───
+
+  apex-mtp:
+    name: "APEX-MTP 35B-A3B"
+    description: "Fast MoE + NextN speculative decoding, 256K ctx"
+    repo: "mudler/Qwen3.6-35B-A3B-APEX-MTP-GGUF"
+    params: "35B total / 3B active"
+    role: auxiliary
+    strengths: [speed, tool-calling, long-context, mtp-speculative]
+    port: 11501
+    systemd: llama-apex
+    quants:
+      8gb:
+        file: "Qwen3.6-35B-A3B-APEX-MTP-I-Nano.gguf"
+        url: "https://huggingface.co/mudler/Qwen3.6-35B-A3B-APEX-MTP-GGUF/resolve/main/Qwen3.6-35B-A3B-APEX-MTP-I-Nano.gguf"
+        flags: { n_gpu_layers: 15, cpu_moe: true, ctx_size: 8192, flash_attn: "auto" }
+      16gb:
+        file: "Qwen3.6-35B-A3B-APEX-MTP-I-Mini.gguf"
+        url: "https://huggingface.co/mudler/Qwen3.6-35B-A3B-APEX-MTP-GGUF/resolve/main/Qwen3.6-35B-A3B-APEX-MTP-I-Mini.gguf"
+        flags: { n_gpu_layers: 30, cpu_moe: true, ctx_size: 32768, flash_attn: "on" }
+      24gb:
+        file: "Qwen3.6-35B-A3B-APEX-MTP-I-Compact.gguf"
+        url: "https://huggingface.co/mudler/Qwen3.6-35B-A3B-APEX-MTP-GGUF/resolve/main/Qwen3.6-35B-A3B-APEX-MTP-I-Compact.gguf"
+        flags: { n_gpu_layers: 99, ctx_size: 262144, flash_attn: "on", cache_type_k: "turbo3", cache_type_v: "turbo3", spec_type: "nextn", draft_block_size: 3 }
+      32gb:
+        file: "Qwen3.6-35B-A3B-APEX-MTP-I-Balanced.gguf"
+        url: "https://huggingface.co/mudler/Qwen3.6-35B-A3B-APEX-MTP-GGUF/resolve/main/Qwen3.6-35B-A3B-APEX-MTP-I-Balanced.gguf"
+        flags: { n_gpu_layers: 99, ctx_size: 262144, flash_attn: "on", cache_type_k: "q8_0", cache_type_v: "q8_0", spec_type: "nextn", draft_block_size: 3 }
+
+# ═══════════════════════════════════════════════════════
+#  PRESETS — named configs that set main + aux together
+# ═══════════════════════════════════════════════════════
+
+presets:
+  darwin+apex:
+    description: "Full local — Darwin reasoning + APEX speed"
+    main: darwin-28b
+    aux: apex-mtp
+
+  darwin:
+    description: "Darwin local + API auxiliary"
+    main: darwin-28b
+    aux: null  # falls back to Nous API
+
+  apex:
+    description: "APEX local + API auxiliary"
+    main: apex-mtp
+    aux: null
+
+  api:
+    description: "Full Nous API (cloud)"
+    main: null
+    aux: null
+
+# ═══════════════════════════════════════════════════════
+#  API MODELS (available through Nous Portal)
+# ═══════════════════════════════════════════════════════
+
+api_models:
+  qwen3.7-max:
+    name: "Qwen 3.7 Max"
+    provider: nous
+    description: "Best reasoning via API"
+    role: main
+
+  qwen3.6-flash:
+    name: "Qwen 3.6 Flash"
+    provider: nous
+    description: "Fast + smart daily driver"
+    role: both
+
+  claude-sonnet-4:
+    name: "Claude Sonnet 4"
+    provider: nous
+    description: "Coding, long context"
+    role: main
