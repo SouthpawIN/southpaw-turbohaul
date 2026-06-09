@@ -24,11 +24,13 @@ import time
 from collections.abc import Iterator
 from pathlib import Path
 
+from turbohaul.gpu_backend import scan_gpu_compute_apps as _gpu_scan_compute_apps
+
 log = logging.getLogger(__name__)
 
 
-# Note: absolute path for nvidia-smi (PATH-injection-resistant).
-_NVIDIA_SMI_PATH = shutil.which("nvidia-smi") or "/usr/bin/nvidia-smi"
+# NOTE: GPU compute-app scanning is now routed through gpu_backend.py.
+# NVIDIA (nvidia-smi) and Intel (sycl-smi / /dev/dri) are auto-detected.
 
 
 def _detect_subreaper_pid() -> int | None:
@@ -103,35 +105,12 @@ def acquire_state_lock(state_db_path: Path) -> Iterator[int]:
 
 
 def scan_gpu_compute_apps() -> list[dict]:
-    """Return list of {pid, used_memory_mib} from nvidia-smi.
+    """Return list of {pid, used_memory_mib}. Backend-agnostic.
 
-    Returns [] silently if nvidia-smi is unavailable (dev / test environments).
+    Returns [] silently if no GPU tool is available (dev / test environments).
+    Delegates to gpu_backend.py which auto-detects NVIDIA or Intel.
     """
-    try:
-        out = subprocess.check_output(
-            [
-                _NVIDIA_SMI_PATH,
-                "--query-compute-apps=pid,used_memory",
-                "--format=csv,noheader,nounits",
-            ],
-            text=True,
-            timeout=10,
-        )
-    except (FileNotFoundError, subprocess.SubprocessError):
-        log.warning("nvidia-smi unavailable; skipping GPU compute-apps scan (dev mode)")
-        return []
-    apps: list[dict] = []
-    for line in out.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        parts = [p.strip() for p in line.split(",")]
-        if len(parts) >= 2:
-            try:
-                apps.append({"pid": int(parts[0]), "used_memory_mib": int(parts[1])})
-            except ValueError:
-                continue
-    return apps
+    return _gpu_scan_compute_apps()
 
 
 def _read_proc_cmdline(pid: int) -> str:

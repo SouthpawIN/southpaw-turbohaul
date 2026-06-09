@@ -1,0 +1,58 @@
+# Turbohaul-Manager v0.3.0-intel — docker-compose for Intel GPU (Arc / Data Center).
+#
+# Intel GPU passthrough uses /dev/dri (NOT --gpus like NVIDIA).
+# The container needs access to /dev/dri/renderD128+ for compute.
+#
+# Usage:
+#   docker compose -f docker-compose.intel.yml up -d
+#
+# Prerequisites:
+#   - Intel GPU drivers installed on host (intel-gpu-ubuntu-22.04-install)
+#   - /dev/dri/renderD128 present (verify: ls -la /dev/dri/)
+#   - User in 'video' and 'render' groups (for non-root access)
+
+services:
+  turbohaul-manager:
+    build:
+      context: .
+      dockerfile: Dockerfile.intel
+    image: turbohaul-manager:v0.3.0-intel
+    container_name: turbohaul-manager-intel
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:11401:11401"
+    volumes:
+      - turbohaul-state:/var/lib/turbohaul
+      - ${LLAMA_SERVER_HOST_PATH:-./bin/llama-server}:/opt/turbohaul/bin/llama-server:ro
+      - ./turbohaul.yaml:/etc/turbohaul/turbohaul.yaml:ro
+    environment:
+      TURBOHAUL_ALLOW_PUBLIC_BIND: "1"
+      TURBOHAUL_GPU_BACKEND: "sycl"
+      TURBOHAUL_LOG_LEVEL: "info"
+      # Intel SYCL runtime tuning
+      SYCL_CACHE_PERSISTENT: "1"
+      SYCL_PI_LEVEL_ZERO_USE_IMMEDIATE_COMMANDLISTS: "1"
+      # Uncomment for HF model pulling
+      # HF_API_KEY:
+    devices:
+      # Intel GPU device passthrough — equivalent to NVIDIA's --gpus all
+      # /dev/dri/card0    — DRM card device
+      # /dev/dri/renderD128 — compute render node (main)
+      # /dev/dri/renderD129 — second GPU (multi-GPU setups)
+      - /dev/dri:/dev/dri
+    group_add:
+      # Ensure container process can access Intel GPU render nodes
+      - video
+      - render
+    # Intel GPU resource limits (optional — uncomment to restrict)
+    # deploy:
+    #   resources:
+    #     limits:
+    #       devices:
+    #         - driver: i915
+    #           count: 1
+    #           capabilities: [gpu]
+
+volumes:
+  turbohaul-state:
+    name: turbohaul-state-intel

@@ -1,0 +1,174 @@
+# Turbohaul-Manager v0.3.0-intel — Intel GPU (Arc / Data Center) variant.
+# Builds Tom's TurboQuant llama.cpp fork with GGML_SYCL=ON for Intel
+# oneAPI Level Zero / SYCL backend.
+#
+# Supports: Intel Arc A-series (A770, A750, A380), Intel Arc B-series (B580),
+#           Intel Data Center GPU Max (Max 1100, Max 1500), integrated GPUs.
+#
+# Build:
+#   docker build -f Dockerfile.intel -t turbohaul-manager:v0.3.0-intel .
+#
+# Run (Arc A770 16GB):
+#   docker run --device /dev/dri:/dev/dri --group-add video \
+#     -p 127.0.0.1:11401:11401 \
+#     -v $(pwd)/state:/var/lib/turbohaul \
+#     -v $(pwd)/models:/var/lib/turbohaul/import-staging \
+#     turbohaul-manager:v0.3.0-intel
+#
+# NOTE: Intel GPU passthrough uses --device /dev/dri (NOT --gpus).
+# The container needs access to /dev/dri/renderD128 (and renderD129 for multi-GPU).
+
+# ------------------------------------------------------------------------------
+# Stage 1: Frontend (same as upstream)
+# ------------------------------------------------------------------------------
+FROM node:20-alpine AS frontend-build
+WORKDIR /work
+COPY src/frontend/package.json src/frontend/package-lock.json ./
+RUN npm ci --no-audit --no-fund
+COPY src/frontend/. ./
+RUN npm run typecheck && npm run build
+
+# ------------------------------------------------------------------------------
+# Stage 2: Build llama.cpp with SYCL backend for Intel GPUs
+#
+# Uses intel/oneapi-basekit which provides:
+#   - Intel oneAPI DPC++/C++ compiler (icpx)
+#   - oneAPI MKL
+#   - Level Zero headers and runtime
+#   - SYCL runtime libraries
+#
+# llama.cpp's GGML_SYCL flag compiles the SYCL backend that talks to
+# Intel GPUs via Level Zero. This replaces GGML_CUDA for Intel hardware.
+# ------------------------------------------------------------------------------
+FROM intel/oneapi-basekit:2025.1.0-devel-ubuntu22.04 AS llama-build
+
+# Set up oneAPI environment
+SHELL ["bash", "-c"]
+RUN source /opt/intel/oneapi/setvars.sh && true
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      git cmake build-essential curl ca-certificates \
+      libcurl4-openssl-dev libssl-dev pkg-config \
+ && rm -rf /var/lib/apt/lists/*
+
+# Install Intel compute-runtime for GPU access during build verification
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      intel-gpu-ubuntu-22.04-install \
+ || apt-get install -y --no-install-recommends \
+      intel-opencl-icd \
+ || true \
+ && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /build
+
+# Clone llama.cpp upstream (Tom's TurboQuant fork with SYCL support)
+RUN git clone https://github.com/TheTom/llama-cpp-turboquant.git /build/llama.cpp
+
+WORKDIR /build/llama.cpp
+RUN git checkout feature/turboquant-kv-cache
+
+# Build with SYCL backend for Intel GPUs
+# Key cmake flags:
+#   GGML_SYCL=ON          — enable SYCL backend (Intel GPU)
+#   GGML_CUDA=OFF         — no CUDA (this is an Intel build)
+#   GGML_VULKAN=OFF       — not needed
+#
+# For multi-arch Intel GPU support, set GGML_SYCL_DEVICE_ARCHITECTURES
+# to match your hardware. Defaults to all supported Intel GPU architectures.
+# Common values:
+#   dg2   — Intel Arc A-series (A770, A750, A380)
+#   battlemage — Intel Arc B-series (B580)
+#   PVC   — Intel Data Center GPU Max (Ponte Vecchio)
+#   ALL   — compile for all supported architectures
+ENV ONEAPI_INSTALL=/opt/intel/oneapi
+RUN source ${ONEAPI_INSTALL}/setvars.sh && \
+    cmake -B build \
+      -DGGML_SYCL=ON \
+      -DGGML_CUDA=OFF \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_C_COMPILER=icx \
+      -DCMAKE_CXX_COMPILER=icpx \
+    && cmake --build build --config Release -j$(nproc) \
+    && strip /build/llama.cpp/build/bin/llama-server 2>/dev/null || true
+
+# Record build metadata
+RUN echo "$(git log -1 --format='%H %s')" > /opt/build_commit.txt
+
+# ------------------------------------------------------------------------------
+# Stage 3: Runtime — Intel oneAPI runtime + turbohaul
+#
+# Uses a slimmer base that ships the Intel GPU runtime (Level Zero, SYCL)
+# without the full build toolchain. intel/oneapi-runtime is ~800MB smaller.
+# ------------------------------------------------------------------------------
+FROM intel/oneapi-runtime:2025.1.0-ubuntu22.04 AS runtime
+
+SHELL ["bash", "-c"]
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      python3.11 python3.11-venv python3.11-dev \
+      ca-certificates curl procps libgomp1 \
+      libze-intel-gpu1 intel-level-zero-gpu \
+      git wget \
+ && rm -rf /var/lib/apt/lists/* \
+ && ln -sf /usr/bin/python3.11 /usr/local/bin/python3 \
+ && ln -sf /usr/bin/python3.11 /usr/local/bin/python
+
+# Install sycl-smi for GPU monitoring (equivalent to nvidia-smi for Intel)
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      intel-gpu-tools \
+ || true \
+ && rm -rf /var/lib/apt/lists/*
+
+# Virtualenv for turbohaul
+RUN python3.11 -m venv /opt/venv \
+ && /opt/venv/bin/pip install --no-cache-dir --upgrade pip
+ENV PATH=/opt/venv/bin:${PATH}
+
+WORKDIR /app
+COPY pyproject.toml README.md ./
+COPY src/turbohaul/ ./src/turbohaul/
+RUN /opt/venv/bin/pip install --no-cache-dir .
+RUN /opt/venv/bin/pip install --no-cache-dir jsonschema==4.21.1
+
+# Copy compiled llama-server + SYCL shared libs from build stage.
+# Preserve the full build output directory so RPATH resolves.
+COPY --from=llama-build /build/llama.cpp/build/bin /opt/turboquant/build/bin
+COPY --from=llama-build /opt/build_commit.txt /opt/build_commit.txt
+
+RUN mkdir -p /opt/turbohaul/bin \
+ && ln -sf /opt/turboquant/build/bin/llama-server /opt/turbohaul/bin/llama-server
+
+# Frontend bundle.
+COPY --from=frontend-build /work/dist /opt/turbohaul/ui_dist
+
+# Runtime dirs.
+RUN mkdir -p /var/lib/turbohaul /etc/turbohaul \
+ && chmod 700 /var/lib/turbohaul
+
+# Default config (overridable via bind-mount).
+COPY docker/turbohaul.default.yaml /etc/turbohaul/turbohaul.yaml
+
+# Attribution + license.
+COPY THIRD_PARTY_LICENSES.md /usr/share/doc/turbohaul/THIRD_PARTY_LICENSES.md
+
+EXPOSE 11401
+
+ENV TURBOHAUL_CONFIG_PATH=/etc/turbohaul/turbohaul.yaml \
+    TURBOHAUL_ALLOW_PUBLIC_BIND=1 \
+    TURBOHAUL_GPU_BACKEND=sycl \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    # Intel oneAPI runtime library paths
+    LD_LIBRARY_PATH=/opt/intel/oneapi/lib:/opt/intel/oneapi/compiler/latest/lib:/opt/turboquant/build/bin \
+    # Level Zero — Intel's low-level GPU API (replaces CUDA driver)
+    SYCL_CACHE_PERSISTENT=1 \
+    SYCL_PI_LEVEL_ZERO_USE_IMMEDIATE_COMMANDLISTS=1
+
+HEALTHCHECK --interval=15s --timeout=3s --retries=5 \
+  CMD curl -fsS http://127.0.0.1:11401/health || exit 1
+
+ENTRYPOINT ["turbohaul-manager"]

@@ -4,7 +4,7 @@
 
 Ollama-shape inference manager using [Tom's TurboQuant](https://github.com/TheTom/llama-cpp-turboquant) fork of llama.cpp.
 
-FIFO queue + grace + IDLE_HOT hot-hold + model swap on Nvidia RTX GPU's including Blackwell.
+FIFO queue + grace + IDLE_HOT hot-hold + model swap on **NVIDIA RTX** (including Blackwell) and **Intel Arc** GPU's.
 
 ## What it does
 
@@ -21,17 +21,28 @@ FIFO queue + grace + IDLE_HOT hot-hold + model swap on Nvidia RTX GPU's includin
 
 ```bash
 # Run it (build locally first — see below; no prebuilt registry image is published yet)
+# NVIDIA GPU:
 docker run --gpus all -p 11401:11401 \
     -v $(pwd)/state:/var/lib/turbohaul \
     -v $(pwd)/models:/var/lib/turbohaul/import-staging \
     turbohaul-manager:v0.3.0
 
-# Build locally (required)
-git clone https://github.com/MrTrenchTrucker/turbohaul-manager.git
-cd turbohaul-manager
-docker build -f Dockerfile.cuda -t turbohaul-manager:v0.3.0 .
+# Intel Arc / Data Center GPU:
+docker run --device /dev/dri --group-add video \
+    -p 11401:11401 \
+    -v $(pwd)/state:/var/lib/turbohaul \
+    -v $(pwd)/models:/var/lib/turbohaul/import-staging \
+    turbohaul-manager:v0.3.0-intel
 ```
 
+# Build locally (required)
+git clone https://github.com/SouthpawIN/southpaw-turbohaul.git
+cd southpaw-turbohaul
+# NVIDIA GPU (CUDA):
+docker build -f Dockerfile.atomic -t turbohaul-manager:v0.3.0 .
+# Intel GPU (SYCL):
+docker build -f Dockerfile.intel -t turbohaul-manager:v0.3.0-intel .
+```
 The `-v $(pwd)/state:/var/lib/turbohaul` mount is **required** for production deployment — without it, `state.sqlite`, `manifests/*.yaml`, and the `blobs/` store live inside the container layer and are destroyed by `docker rm` or container-layer corruption. See [docs/PERSISTENCE_CHECKLIST.md](docs/PERSISTENCE_CHECKLIST.md) for the full hardening checklist.
 
 ## API

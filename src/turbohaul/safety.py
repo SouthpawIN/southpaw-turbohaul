@@ -21,10 +21,13 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
+from turbohaul.gpu_backend import get_gpu_memory_free_mib, get_gpu_memory_used_mib
+
 
 log = logging.getLogger(__name__)
 
-_NVIDIA_SMI_PATH = shutil.which("nvidia-smi") or "/usr/bin/nvidia-smi"
+# NOTE: GPU memory queries now go through gpu_backend.py.
+# nvidia-smi / sycl-smi auto-detection is handled there.
 
 
 @dataclass(frozen=True)
@@ -131,25 +134,8 @@ def check_iowait(max_percent: float, sample_window_s: float = 0.4) -> GateResult
 
 
 def _read_free_vram_mib() -> int | None:
-    """Query nvidia-smi for GPU 0 free memory in MiB. None if unavailable."""
-    try:
-        out = subprocess.check_output(
-            [
-                _NVIDIA_SMI_PATH,
-                "--query-gpu=memory.free",
-                "--format=csv,noheader,nounits",
-                "-i", "0",
-            ],
-            text=True,
-            timeout=5,
-        )
-    except (FileNotFoundError, subprocess.SubprocessError, OSError):
-        return None
-    line = out.strip().splitlines()[0] if out.strip() else ""
-    try:
-        return int(line.strip().split(",")[0].strip())
-    except (ValueError, IndexError):
-        return None
+    """Query GPU 0 free memory in MiB. Backend-agnostic (NVIDIA/Intel/null)."""
+    return get_gpu_memory_free_mib()
 
 
 def check_free_vram(min_free_mib: int, manifest_expected_bytes: int = 0) -> GateResult:
