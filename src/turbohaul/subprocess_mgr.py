@@ -27,14 +27,14 @@ from typing import Any
 
 import httpx
 
+from turbohaul.gpu_backend import get_gpu_memory_used_mib as _gpu_used_mib
+
 
 log = logging.getLogger(__name__)
 
 
-# Fix: resolve nvidia-smi to absolute path at module load so a
-# later PATH-poisoning attempt (env injection, attacker-controlled $PATH
-# entry) cannot redirect the lookup at run time.
-_NVIDIA_SMI_PATH = shutil.which("nvidia-smi") or "/usr/bin/nvidia-smi"
+# NOTE: GPU memory queries are now routed through gpu_backend.py which
+# auto-detects NVIDIA (nvidia-smi), Intel (sycl-smi), or null backend.
 
 
 class HealthCheckFailed(RuntimeError):
@@ -176,35 +176,27 @@ async def wait_until_healthy(
             await http_client.aclose()
 
 
-def _default_nvidia_smi_runner() -> str:
-    return subprocess.check_output(
-        [
-            _NVIDIA_SMI_PATH,
-            "--query-gpu=memory.used",
-            "--format=csv,noheader,nounits",
-            "-i", "0",
-        ],
-        text=True,
-        timeout=5,
-    )
-
-
 def get_gpu_memory_used_mib(
     nvidia_smi_runner: Callable[..., str] | None = None,
 ) -> int | None:
-    """Return GPU 0 `memory.used` in MiB. None if nvidia-smi unavailable."""
-    runner = nvidia_smi_runner or _default_nvidia_smi_runner
-    try:
-        out = runner()
-    except (FileNotFoundError, subprocess.SubprocessError):
-        return None
-    line = out.strip().splitlines()[0] if out.strip() else ""
-    if not line:
-        return None
-    try:
-        return int(line.strip().split(",")[0].strip())
-    except (ValueError, IndexError):
-        return None
+    """Return GPU 0 memory.used in MiB. Backend-agnostic (NVIDIA/Intel/null).
+
+    If a legacy nvidia_smi_runner callable is provided (for test injection),
+    it is used directly. Otherwise delegates to gpu_backend.py.
+    """
+    if nvidia_smi_runner is not None:
+        try:
+            out = nvidia_smi_runner()
+        except (FileNotFoundError, subprocess.SubprocessError):
+            return None
+        line = out.strip().splitlines()[0] if out.strip() else ""
+        if not line:
+            return None
+        try:
+            return int(line.strip().split(",")[0].strip())
+        except (ValueError, IndexError):
+            return None
+    return _gpu_used_mib()
 
 
 async def drained_sigterm(

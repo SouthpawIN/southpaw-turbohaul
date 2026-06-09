@@ -111,3 +111,196 @@ api_models:
     provider: nous
     description: "Coding, long context"
     role: main
+
+# ═══════════════════════════════════════════════════════
+#  INTEL GPU QUANT TIERS
+#  Benchmarked on Intel Arc Pro B60 24GB (garlic-clove)
+#
+#  BACKEND SELECTION (critical for performance):
+#  - Vulkan: faster for MoE (APEX 38 tok/s) and dense Q3_K (Darwin 6.2 tok/s)
+#  - SYCL:   faster for dense Q4_0/Q4_K_M (Qwen27B 17.8/16.6 tok/s)
+#
+#  FLASH ATTENTION:
+#  - OFF is consistently 1-5% faster for token generation on Intel
+#  - ON may help prompt processing on some models
+#
+#  Key differences from CUDA tiers:
+#  - No turbo2/3/4 KV cache quant (TurboQuant is CUDA-specific)
+#  - MTP speculative decoding not available on SYCL/Vulkan
+#  - More conservative context window sizes
+#  - Use flash_attn: "off" for best TG speed
+#
+#  BENCHMARK SUMMARY (Arc Pro B60, llama-bench -n 128 -p 512):
+#  ┌──────────────────────────┬─────────┬─────┬────────┬────────┐
+#  │ Model                    │ Backend │ FA  │ PP t/s │ TG t/s │
+#  ├──────────────────────────┼─────────┼─────┼────────┼────────┤
+#  │ APEX-MTP I-Mini (14GB)   │ Vulkan  │ off │ 509.7  │ 38.1   │
+#  │ APEX-MTP I-Mini          │ SYCL    │ off │ 380.6  │ 23.2   │
+#  │ 35B-A3B Q3_K_S (15GB)    │ Vulkan  │ off │ 456.4  │ 22.2   │
+#  │ 35B-A3B Q3_K_S           │ SYCL    │ off │ 304.2  │ 22.0   │
+#  │ Qwen27B Q4_K_M (16GB)    │ SYCL    │ off │ 140.3  │ 16.6   │
+#  │ Qwen27B Q4_0 (15GB)      │ SYCL    │ on  │ 125.5  │ 17.8   │
+#  │ Qwen27B Q4_0             │ Vulkan  │ off │ 170.9  │ 13.8   │
+#  │ Qwen27B Q4_K_M           │ Vulkan  │ off │ 153.4  │  6.9   │
+#  │ Darwin-28B Q3_K_S (12GB) │ Vulkan  │ off │ 175.0  │  6.2   │
+#  │ Darwin-28B Q3_K_S        │ SYCL    │ off │ 137.8  │  4.7   │
+#  └──────────────────────────┴─────────┴─────┴────────┴────────┘
+# ═══════════════════════════════════════════════════════
+
+intel_models:
+
+  darwin-28b-intel:
+    name: "Darwin-28B-REASON (Intel)"
+    description: "Darwin reasoning on Intel Arc GPUs — Vulkan backend, FA off optimal"
+    repo: "mradermacher/Darwin-28B-REASON-GGUF"
+    params: "27.6B dense"
+    role: main
+    gpu_backend: vulkan
+    strengths: [reasoning, math, science]
+    port: 11500
+    quants:
+      8gb:
+        file: "Darwin-28B-REASON.Q2_K.gguf"
+        url: "https://huggingface.co/mradermacher/Darwin-28B-REASON-GGUF/resolve/main/Darwin-28B-REASON.Q2_K.gguf"
+        flags: { n_gpu_layers: 20, ctx_size: 4096, flash_attn: "off" }
+      12gb:
+        file: "Darwin-28B-REASON.Q3_K_S.gguf"
+        url: "https://huggingface.co/mradermacher/Darwin-28B-REASON-GGUF/resolve/main/Darwin-28B-REASON.Q3_K_S.gguf"
+        flags: { n_gpu_layers: 99, ctx_size: 8192, flash_attn: "off" }
+      16gb:
+        file: "Darwin-28B-REASON.Q3_K_M.gguf"
+        url: "https://huggingface.co/mradermacher/Darwin-28B-REASON-GGUF/resolve/main/Darwin-28B-REASON.Q3_K_M.gguf"
+        flags: { n_gpu_layers: 99, ctx_size: 16384, flash_attn: "off" }
+      24gb:
+        file: "Darwin-28B-REASON.Q4_K_M.gguf"
+        url: "https://huggingface.co/mradermacher/Darwin-28B-REASON-GGUF/resolve/main/Darwin-28B-REASON.Q4_K_M.gguf"
+        flags: { n_gpu_layers: 99, ctx_size: 32768, flash_attn: "off" }
+
+  apex-intel:
+    name: "APEX-MTP 35B-A3B (Intel)"
+    description: "APEX MoE on Intel Arc — Vulkan backend for best MoE speed (38 tok/s)"
+    repo: "mudler/Qwen3.6-35B-A3B-APEX-MTP-GGUF"
+    params: "35B total / 3B active"
+    role: auxiliary
+    gpu_backend: vulkan
+    strengths: [speed, tool-calling, long-context]
+    port: 11501
+    quants:
+      8gb:
+        file: "Qwen3.6-35B-A3B-APEX-MTP-I-Nano.gguf"
+        url: "https://huggingface.co/mudler/Qwen3.6-35B-A3B-APEX-MTP-GGUF/resolve/main/Qwen3.6-35B-A3B-APEX-MTP-I-Nano.gguf"
+        flags: { n_gpu_layers: 15, cpu_moe: true, ctx_size: 4096, flash_attn: "off" }
+      12gb:
+        file: "Qwen3.6-35B-A3B-APEX-MTP-I-Mini.gguf"
+        url: "https://huggingface.co/mudler/Qwen3.6-35B-A3B-APEX-MTP-GGUF/resolve/main/Qwen3.6-35B-A3B-APEX-MTP-I-Mini.gguf"
+        flags: { n_gpu_layers: 20, cpu_moe: true, ctx_size: 8192, flash_attn: "off" }
+      16gb:
+        file: "Qwen3.6-35B-A3B-APEX-MTP-I-Mini.gguf"
+        url: "https://huggingface.co/mudler/Qwen3.6-35B-A3B-APEX-MTP-GGUF/resolve/main/Qwen3.6-35B-A3B-APEX-MTP-I-Mini.gguf"
+        flags: { n_gpu_layers: 99, ctx_size: 16384, flash_attn: "off" }
+      24gb:
+        file: "Qwen3.6-35B-A3B-APEX-MTP-I-Compact.gguf"
+        url: "https://huggingface.co/mudler/Qwen3.6-35B-A3B-APEX-MTP-GGUF/resolve/main/Qwen3.6-35B-A3B-APEX-MTP-I-Compact.gguf"
+        flags: { n_gpu_layers: 99, ctx_size: 32768, flash_attn: "off" }
+
+  # Non-MTP fast model — standard Qwen3.6-35B-A3B without speculative decoding
+  # 22 tok/s on Vulkan, slightly slower than APEX-MTP (38 tok/s) but simpler setup
+  qwen35m-intel:
+    name: "Qwen3.6-35B-A3B (Intel, non-MTP)"
+    description: "Fast MoE without MTP — standard Qwen3.6-35B-A3B, 22 tok/s on Arc"
+    repo: "unsloth/Qwen3.6-35B-A3B-GGUF"
+    params: "35B total / 3B active"
+    role: auxiliary
+    gpu_backend: vulkan
+    strengths: [speed, tool-calling, long-context]
+    port: 11502
+    quants:
+      8gb:
+        file: "Qwen3.6-35B-A3B-UD-Q2_K_XL.gguf"
+        url: "https://huggingface.co/unsloth/Qwen3.6-35B-A3B-GGUF/resolve/main/Qwen3.6-35B-A3B-UD-Q2_K_XL.gguf"
+        flags: { n_gpu_layers: 20, ctx_size: 4096, flash_attn: "off" }
+      12gb:
+        file: "Qwen3.6-35B-A3B-UD-IQ3_S.gguf"
+        url: "https://huggingface.co/unsloth/Qwen3.6-35B-A3B-GGUF/resolve/main/Qwen3.6-35B-A3B-UD-IQ3_S.gguf"
+        flags: { n_gpu_layers: 99, ctx_size: 8192, flash_attn: "off" }
+      16gb:
+        file: "Qwen3.6-35B-A3B-UD-Q3_K_S.gguf"
+        url: "https://huggingface.co/unsloth/Qwen3.6-35B-A3B-GGUF/resolve/main/Qwen3.6-35B-A3B-UD-Q3_K_S.gguf"
+        flags: { n_gpu_layers: 99, ctx_size: 16384, flash_attn: "off" }
+      24gb:
+        file: "Qwen3.6-35B-A3B-UD-Q4_K_M.gguf"
+        url: "https://huggingface.co/unsloth/Qwen3.6-35B-A3B-GGUF/resolve/main/Qwen3.6-35B-A3B-UD-Q4_K_M.gguf"
+        flags: { n_gpu_layers: 99, ctx_size: 32768, flash_attn: "off" }
+
+  # Dense 27B with SYCL backend — SYCL is 2.4x faster than Vulkan for Q4 quants
+  qwen27b-intel:
+    name: "Qwen3.6-27B (Intel, SYCL-optimized)"
+    description: "Dense 27B on Intel — SYCL backend, Q4_0 gives 17.8 tok/s"
+    repo: "unsloth/Qwen3.6-27B-GGUF"
+    params: "27B dense"
+    role: main
+    gpu_backend: sycl
+    strengths: [coding, reasoning, general]
+    port: 11503
+    quants:
+      8gb:
+        file: "Qwen3.6-27B-UD-IQ2_M.gguf"
+        url: "https://huggingface.co/unsloth/Qwen3.6-27B-GGUF/resolve/main/Qwen3.6-27B-UD-IQ2_M.gguf"
+        flags: { n_gpu_layers: 20, ctx_size: 4096, flash_attn: "off" }
+      12gb:
+        file: "Qwen3.6-27B-Q3_K_S.gguf"
+        url: "https://huggingface.co/unsloth/Qwen3.6-27B-GGUF/resolve/main/Qwen3.6-27B-Q3_K_S.gguf"
+        flags: { n_gpu_layers: 99, ctx_size: 8192, flash_attn: "off" }
+      16gb:
+        file: "Qwen3.6-27B-Q4_0.gguf"
+        url: "https://huggingface.co/unsloth/Qwen3.6-27B-GGUF/resolve/main/Qwen3.6-27B-Q4_0.gguf"
+        flags: { n_gpu_layers: 99, ctx_size: 16384, flash_attn: "off" }
+      24gb:
+        file: "Qwen3.6-27B-Q4_K_M.gguf"
+        url: "https://huggingface.co/unsloth/Qwen3.6-27B-GGUF/resolve/main/Qwen3.6-27B-Q4_K_M.gguf"
+        flags: { n_gpu_layers: 99, ctx_size: 32768, flash_attn: "off" }
+
+# ═══════════════════════════════════════════════════════
+#  INTEL PRESETS — named configs for Intel GPU hardware
+# ═══════════════════════════════════════════════════════
+
+intel_presets:
+  darwin-arc:
+    description: "Darwin reasoning on Intel Arc (16GB: A770) — Vulkan, FA off"
+    main: darwin-28b-intel
+    aux: null
+
+  apex-arc:
+    description: "APEX MoE on Intel Arc (8GB: A750 / A580) — Vulkan, FA off"
+    main: apex-intel
+    aux: null
+
+  darwin+apex-arc:
+    description: "Full Intel local — Darwin reasoning + APEX speed, Vulkan"
+    main: darwin-28b-intel
+    aux: apex-intel
+
+  darwin-pro-b60:
+    description: "Darwin reasoning on Intel Arc Pro B60 (24GB) — 6.2 tok/s"
+    main: darwin-28b-intel
+    aux: null
+
+  apex-pro-b60:
+    description: "APEX MoE on Intel Arc Pro B60 (24GB) — 38 tok/s Vulkan"
+    main: apex-intel
+    aux: null
+
+  qwen27b-pro-b60:
+    description: "Qwen3.6-27B on Arc Pro B60 (24GB) — 17.8 tok/s SYCL Q4_0"
+    main: qwen27b-intel
+    aux: null
+
+  qwen27b+apex-pro-b60:
+    description: "Qwen27B reasoning + APEX speed on Arc Pro B60 — best of both"
+    main: qwen27b-intel
+    aux: apex-intel
+
+  intel-api:
+    description: "Intel GPU host + Nous API (no local model)"
+    main: null
+    aux: null

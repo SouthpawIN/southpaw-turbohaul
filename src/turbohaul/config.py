@@ -9,6 +9,8 @@ import os
 from pathlib import Path
 from typing import Any
 
+from turbohaul.gpu_backend import gpu_backend_name
+
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -128,6 +130,7 @@ class BootConfig(BaseModel):
     storage: StorageConfig
     runtime: RuntimePathsConfig
     ui: UIConfig
+    gpu_backend: str = ""  # empty = auto-detect; "cuda" | "sycl" | "none"
 
 
 class RuntimeConfig(BaseModel):
@@ -150,6 +153,7 @@ class TurbohaulConfig(BaseModel):
     ui: UIConfig
     queue: QueueConfig
     pull: PullConfig
+    gpu_backend: str = ""  # empty = auto-detect; "cuda" | "sycl" | "none"
 
     def split(self) -> tuple[BootConfig, RuntimeConfig]:
         boot = BootConfig(
@@ -157,6 +161,7 @@ class TurbohaulConfig(BaseModel):
             storage=self.storage,
             runtime=self.runtime,
             ui=self.ui,
+            gpu_backend=self.gpu_backend,
         )
         runtime = RuntimeConfig(queue=self.queue, pull=self.pull)
         return boot, runtime
@@ -191,4 +196,8 @@ def apply_env_overrides(cfg: TurbohaulConfig) -> TurbohaulConfig:
         v = os.environ.get(env_key)
         if v is not None:
             data[section][field] = cast(v)
+    # gpu_backend is a root-level field (not nested under a section).
+    gpu_backend_env = os.environ.get("TURBOHAUL_GPU_BACKEND")
+    if gpu_backend_env is not None:
+        data["gpu_backend"] = gpu_backend_env.strip().lower()
     return TurbohaulConfig(**data)
