@@ -88,6 +88,40 @@ def spawn_sidecar(
     else:
         exec_path = str(binary)
         pass_fds = ()
+    # ------------------------------------------------------------------
+    # Polite VRAM (2026-06-08): probe free VRAM and pick a tier.
+    # Don't hog the GPU when other workloads need it. If the caller
+    # already pinned an explicit `-ngl` in argv_flags, respect that and
+    # skip the probe. Otherwise, let `polite_vram` pick a tier that
+    # fits the current free VRAM.
+    #
+    # Override via env var: TURBOHAUL_POLITE_VRAM=off disables the probe
+    # (legacy behavior, all VRAM always used).
+    # ------------------------------------------------------------------
+    polite_off = os.environ.get("TURBOHAUL_POLITE_VRAM", "on").lower() in (
+        "off", "0", "false", "no", "n",
+    )
+    has_explicit_ngl = any(
+        a in ("-ngl", "--n-gpu-layers", "--gpu-layers", "--ngl") or
+        a.startswith("-ngl=") or
+        a.startswith("--n-gpu-layers=")
+        for a in argv_flags
+    )
+    if not polite_off and not has_explicit_ngl:
+        try:
+            import importlib.util
+            _pv_path = "/home/sovthpaw/.hermes/bin/polite_vram.py"
+            _pv_spec = importlib.util.spec_from_file_location("polite_vram", _pv_path)
+            _pv = importlib.util.module_from_spec(_pv_spec)
+            _pv_spec.loader.exec_module(_pv)
+            free_mb = _pv.probe_free_vram_mb(gpu_index=0)
+            tier = _pv.pick_ngl_tier(free_mb)
+            argv_flags = list(argv_flags) + _pv.format_ngl_arg(tier)
+            log.info(_pv.format_polite_log(
+                free_mb, tier, extra=f"for model={model_tag}"))
+        except Exception as e:
+            log.warning("polite_vram probe failed (%s); spawning with default flags", e)
+    # ------------------------------------------------------------------
     cmd = [
         exec_path,
         "--port", str(port),
