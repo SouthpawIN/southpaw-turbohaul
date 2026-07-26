@@ -338,12 +338,18 @@ class TestStreamPayloadBuilder:
 
         kwargs = {"enable_thinking": False}
         payload = _build_stream_payload(
-            client_meta={"chat_template_kwargs": kwargs},
+            client_meta={
+                "chat_template_kwargs": kwargs,
+                "reasoning_format": "none",
+                "reasoning_in_content": False,
+            },
             model="m",
             messages=[],
         )
 
         assert payload["chat_template_kwargs"] == kwargs
+        assert payload["reasoning_format"] == "none"
+        assert payload["reasoning_in_content"] is False
 
     def test_build_payload_forwards_tool_call_fields(self):
         """: tools / tool_choice / parallel_tool_calls / function_call /
