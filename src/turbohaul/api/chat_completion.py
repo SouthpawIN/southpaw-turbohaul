@@ -455,6 +455,7 @@ async def openai_chat_completions(payload: dict, request: Request):
         "top_p": payload.get("top_p"),
         "stream": False,
         "max_tokens": payload.get("max_tokens"),
+        "chat_template_kwargs": payload.get("chat_template_kwargs"),
         # Ollama-style keep_alive → IDLE_HOT extension hint (advisor Option E)
         "keep_alive_s": parse_keep_alive(payload.get("keep_alive")),
         #  Site A: forward validated response_format to
@@ -563,8 +564,8 @@ _COMMON_FORWARDED_KNOBS = (
     # rejects json_schema as deferred-to-. Thinking-mode JSON guarantee
     # blocked upstream on llama.cpp #20345 + Ollama #10538.
     "response_format",
-    # an agent preserved-thinking controls
-    "thinking_budget_tokens", "reasoning_budget", "reasoning",
+    # Preserved-thinking controls and llama.cpp template switches.
+    "thinking_budget_tokens", "reasoning_budget", "reasoning", "chat_template_kwargs",
     # Ollama-parity samplers
     "presence_penalty", "frequency_penalty", "repeat_penalty",
     "repeat_last_n", "typical_p", "seed",

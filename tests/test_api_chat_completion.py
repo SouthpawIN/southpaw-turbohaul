@@ -333,6 +333,18 @@ class TestStreamPayloadBuilder:
         assert payload["reasoning_budget"] == 1000
         assert payload["thinking_budget_tokens"] == 500
 
+    def test_build_payload_forwards_chat_template_kwargs(self):
+        from turbohaul.api.chat_completion import _build_stream_payload
+
+        kwargs = {"enable_thinking": False}
+        payload = _build_stream_payload(
+            client_meta={"chat_template_kwargs": kwargs},
+            model="m",
+            messages=[],
+        )
+
+        assert payload["chat_template_kwargs"] == kwargs
+
     def test_build_payload_forwards_tool_call_fields(self):
         """: tools / tool_choice / parallel_tool_calls / function_call /
         functions must be passed through to llama-server when present. Structured
